@@ -45,7 +45,7 @@ def template1(name):
 
     # ----------添加文字--------------------
     run_text_4 = p4.add_run()
-    run_text_4.add_picture('wmlogo.jpg' , width=Mm(40))
+    run_text_4.add_picture('wmlogo.jpeg' , width=Mm(80))
 
     word_document.save('VIP/%s.docx' % name)
 # 模板2
@@ -88,7 +88,7 @@ def template2(name):
 
     # ----------添加文字--------------------
     run_text_4 = p4.add_run()
-    run_text_4.add_picture('wmlogo.jpg', width=Mm(40))
+    run_text_4.add_picture('wmlogo.jpeg', width=Mm(80))
 
     word_document.save('VIP/%s.docx' % name)
 # 模板3
@@ -134,7 +134,7 @@ def template3(name):
 
     # ----------添加文字--------------------
     run_text_4 = p4.add_run()
-    run_text_4.add_picture('wmlogo.jpg', width=Mm(40))
+    run_text_4.add_picture('wmlogo.jpeg', width=Mm(80))
 
     word_document.save('Media/%s.docx' % name)
 
@@ -154,7 +154,7 @@ def main_creater():
             # 女士称呼 保存嘉宾目录
             template2(row[0])
             pass
-        elif row[2] == '媒体'：
+        elif row[2] == '媒体':
             # 媒体称呼 保存媒体目录
             template3(row[0])
             pass
