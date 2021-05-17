@@ -1,0 +1,240 @@
+#!groovy
+pipeline {
+    //在16.97上执行Pipeline
+    agent {
+      label '192.168.16.97_Coverity'
+    }
+    //参数化变量，目前只支持[booleanParam, choice, credentials, file, text, password, run, string]这几种参数类型，其他高级参数化类型还需等待社区支持。
+    parameters {
+        //选择要扫描的项目
+        choice choices: ['DTS', 'DTI', 'UIS', 'FGAP','DTP'], description: '请选择要扫描/导出Coverity报告的项目 ', name: 'Project'
+        //choice(name: 'Project',choices:'DTS,DTI,UIS,UIS_XiNan,FGAP,DTP', description: '请选择要扫描/导出Coverity报告的项目')
+        //选择要扫描的SVN分支
+        //choice(name: 'Project',choices:'DTS,DTI,UIS,UIS_XiNan,FGAP,DTP', description: '请选择要扫描/导出Coverity报告的项目')
+        //填写收件人邮箱
+        string(name:'Email_To', defaultValue: 'madm', description: '请填写收件人邮箱，只填写@前半部分，例如jenkins@topwalk.com，填写jenkins即可！')
+        //若勾选在pipelie完成后会邮件通知测试人员进行验收
+        booleanParam(name: 'isScan',description: '是否进行Coverity扫描',defaultValue: false )
+    }
+    tools {
+        maven  'maven3.6.3'
+        ant    'apache-ant-1.9.15'
+        nodejs 'NodeJS 14.8.0'
+    }
+    //常量参数，初始确定后一般不需更改
+    environment{
+        //git服务全系统只读账号cred_id【参数值对外隐藏】
+        CRED_ID='06853883-b30f-45ff-ba1c-3c59d5545eed'
+        COVERITY_HOST='192.168.19.254'
+        COVERITY_PASSPHRASE='Topwalk@19.254'
+        COV_USER='admin'
+        COVERITY_PORT=8080
+
+    }
+    //pipeline的各个阶段场景
+    stages {
+        stage('Coverity扫描') {
+            steps {
+                echo "starting Coverity Scan with Coverity......"
+                script {
+                    def baseUrl="https://192.168.18.230/svn/Topwalk-${params.Project}/branches"
+                    if(params.isScan==false){
+                        echo "不需要进行Coverity扫描！"
+                    }else{
+                        //进行Coverity扫描
+                        switch(params.Project) {
+                            case 'DTS':
+                                //sonar:sonar.QualityGate should pass
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topjava/topwalk-dts-rest"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: 'topwalk-publicsubmitservice', remote: "${baseUrl}/${SVN_Branches}topjava/topwalk-publicsubmitservice"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: 'topwalk-security-check', remote: "${baseUrl}/${SVN_Branches}topjava/topwalk-security-check"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                iDir = 'cov-idir'
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: '', passwordVariable: '', portVariable: '', usernameVariable: '') {
+                                    sh "cov-build --dir ${iDir} sh build.sh"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh "cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream \"DTS_JAVA\""
+                                }
+
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }
+                                coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'DTS'
+                                //WEB 端扫描
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topweb/topwalk-dts-web/DTS"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                iDir = 'cov-idir'
+                                // use a variable for the shared intermediate directory
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: "COVERITY_HOST", passwordVariable: "COVERITY_PASSPHRASE", portVariable: "COVERITY_PORT", usernameVariable: "COV_USER") {
+                                // run cov-build capture command
+                                    sh "cov-configure --javascript"
+                                    sh "cov-build --dir ${iDir} --fs-capture-search ${WORKSPACE} --no-command"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh "cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream \"DTS_WEB\""
+                                }
+                                dir("${iDir}") {
+                                    deleteDir()
+                                } 
+                                coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'DTS'
+                            case 'UIS':
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topjava"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                iDir = 'cov-idir'
+                                // use a variable for the shared intermediate directory
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: "${COVERITY_HOST}", passwordVariable: "COVERITY_PASSPHRASE", portVariable: "COVERITY_PORT", usernameVariable: "COV_USER") {
+                                    // run cov-build capture command
+                                    sh "rm -rf /MavenRepository/repository/com/topwalk/databaseutil"
+                                    sh "cov-build --dir ${iDir} sh build.sh"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh'''if [ ${SVN_Branches} == "Custom-v3.0.0-XiNan" ];then
+                                        cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream "UIS_XiNan"
+                                        else
+                                        cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream "UIS_JAVA"
+                                        fi'''  
+                                }
+                                
+                                // cleanup intermediate directory after commit was made (optional space saving step)
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }
+                                if ( "${SVN_Branches}" == "Custom-v3.0.0-XiNan" ) {
+                                    coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'UIS_XiNan'
+                                } else {
+                                    coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'UIS'
+                                }
+                                //WEB 端扫描
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topweb"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                iDir = 'cov-idir'
+                                // use a variable for the shared intermediate directory
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: "${COVERITY_HOST}", passwordVariable: "COVERITY_PASSPHRASE", portVariable: "COVERITY_PORT", usernameVariable: "COV_USER") {
+                                    // run cov-build capture command
+                                    sh "cov-configure --javascript"
+                                    sh "cov-build --dir ${iDir} --fs-capture-search ${WORKSPACE} --no-command"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh "cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream \"UIS_WEB\""
+                                }
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }
+                                coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'UIS'
+                            case 'FGAP':
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                // use a variable for the shared intermediate directory
+                                iDir = 'cov-idir'
+                                // use a variable for the shared intermediate directory
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: '', passwordVariable: '', portVariable: '', usernameVariable: '') {
+                                    // run cov-build capture command
+                                    sh "cov-build --dir ${iDir} make && make img"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh "cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream \"FGAP\""
+                                }
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }
+                                coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'FGAP'
+                            case 'DTI':
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topjava/${dir}"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                // use a variable for the shared intermediate directory
+                                iDir = 'cov-idir'
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: '', passwordVariable: '', portVariable: '', usernameVariable: '') {
+                                // run cov-build capture command
+                                    sh "cov-build --dir ${iDir} mvn clean install assembly:assembly -Dmaven.test.skip=true"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh'''if [[ ${dir} == "dti-all" && ${SVN_Branches} == "Custom-v1.0.0-XiNan" ]];then
+                                        cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream "DTI_XiNan"
+                                        fi
+                                        if [[ ${dir} == "dti-all" && ${SVN_Branches} != "Custom-v1.0.0-XiNan" ]];then
+                                            cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream "DTI 1"
+                                        fi
+                                        if [ ${dir} == "dti-all-twoWay" ];then
+                                            cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream "DTI_2"
+                                        fi'''
+                                }
+                                // cleanup intermediate directory after commit was made (optional space saving step)
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }
+                                if ( '${dir}' == "dti-all" && '${SVN_Branches}' == "Custom-v1.0.0-XiNan" ) {
+                                    coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'UIS_XiNan'
+                                }
+                                if ( '${dir}' == "dti-all" && '${SVN_Branches}' != "Custom-v1.0.0-XiNan" ) {
+                                    coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'DTI'
+                                }
+                                if ( '${dir}' == "dti-all-twoWay" ) {
+                                    coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'DTS'
+                                }
+                            case 'DTP':
+                                //NodeJS 语言扫描
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topjava/dtpweb/WebRoot"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                // use a variable for the shared intermediate directory
+                                iDir = 'cov-idir'
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: '', passwordVariable: '', portVariable: '', usernameVariable: '') {
+                                    // run cov-build capture command
+                                    sh "cov-configure --javascript"
+                                    sh "cov-build --dir ${iDir} --fs-capture-search ${WORKSPACE} --no-command"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh "cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream \"DTPS_JS\""
+                                }
+                                // cleanup intermediate directory after commit was made (optional space saving step)
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }
+                                coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'DTPS'
+                                // c语言扫描
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topc/C/src"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                iDir = 'cov-idir'
+                                // use a variable for the shared intermediate directory
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: '', passwordVariable: '', portVariable: '', usernameVariable: '') {
+                                    sh "cov-build --dir ${iDir} make"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh "cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream \"DTPS_C\""
+                                }
+                                // cleanup intermediate directory after commit was made (optional space saving step)
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }
+                                coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'DTPS'
+                                // java语言扫描
+                                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "${baseUrl}/${SVN_Branches}topjava"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                                iDir = 'cov-idir'
+                                // use a variable for the shared intermediate directory
+                                withCoverityEnv(coverityToolName: 'Coverity', hostVariable: '', passwordVariable: '', portVariable: '', usernameVariable: '') {
+                                    // run cov-build capture command
+                                    sh "cov-build --dir ${iDir} sh build.sh"
+                                    sh "cov-analyze --dir ${iDir} --all"
+                                    sh "cov-commit-defects --dir ${iDir} --host ${env.COVERITY_HOST} --port ${env.COVERITY_PORT} --stream \"DTPS_JAVA\""
+                                }
+                                // cleanup intermediate directory after commit was made (optional space saving step)
+                                dir("${iDir}") {
+                                    deleteDir()
+                                }  
+                                coverityResults connectInstance: 'coverity', connectView: 'My Outstanding', projectId: 'DTPS'
+                        }
+                    }
+                    
+                }
+                buildDescription '扫描项目：${Project}, 分支：${SVN_Branches}, 邮件接收者：${Email_To}'
+            }
+        }
+        stage('导出报告'){
+            steps {
+				echo "Export ${params.Project} project ${SVN_Branches} 分支Coverity Report......"
+                cleanWs disableDeferredWipeout: true, deleteDirs: true
+                checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: CRED_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: 'https://192.168.18.230/svn/Topwalk-DTS/branches/DEV/Jenkinsfile']], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+                sh'''unset DISPLAY
+                /opt/cov-reports-2020.03/bin/cov-generate-security-report cov_config_${Project}.yml  --output Coverity_report_${Project}_`date "+%Y-%m-%d_%H"`.PDF --password file:passwd.txt'''
+            }
+        }
+        stage('发送邮件'){
+            steps {
+                emailext from:'Jenkins@topwalk.com', body:"${params.Project} 项目 ${SVN_Branches} 分支 Coverity 报告见附件。", attachmentsPattern: 'Coverity_report_*.PDF', to: "${Email_To}@topwalk.com", subject: 'Coverity_Report'
+            }
+        }
+    }
+}
